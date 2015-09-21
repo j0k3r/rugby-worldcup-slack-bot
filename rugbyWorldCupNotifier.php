@@ -37,10 +37,16 @@ $language = array(
   'fr' => array(
     'Le match',
     'commence',
+    'Score',
+    'Joueur',
+    'Temps',
   ),
   'en' => array(
     'The match between',
     'has started',
+    'Score',
+    'Player',
+    'Time',
   )
 );
 
@@ -84,21 +90,28 @@ function getUrl($url)
   die();
 }
 
-function postToSlack($text, $attachments_text = '')
+function postToSlack($text, $attachments_fields = array())
 {
-  // var_dump($text);
-  // return;
-
   $slackUrl = 'https://slack.com/api/chat.postMessage?token='.SLACK_TOKEN.
     '&channel='.urlencode(SLACK_CHANNEL).
     '&username='.urlencode(SLACK_BOT_NAME).
     '&icon_url='.SLACK_BOT_AVATAR.
-    '&unfurl_links=1&parse=full'.
+    '&unfurl_links=1&parse=full&pretty=1'.
     '&text='.urlencode($text);
 
-  if ($attachments_text)
+  if (!empty($attachments_fields))
   {
-    $slackUrl .= '&attachments='.urlencode('[{"text": "'.$attachments_text.'"}]');
+    $fields = array();
+    foreach ($attachments_fields as $key => $value)
+    {
+      $fields[] = array(
+        'title' => $key,
+        'value' => $value,
+        'short' => true,
+      );
+    }
+
+    $slackUrl .= '&attachments='.urlencode('[{"fields":'.json_encode($fields).'}]');
   }
 
   var_dump(getUrl($slackUrl));
@@ -111,7 +124,7 @@ $response = json_decode(getUrl('http://cmsapi.pulselive.com/rugby/event/1238/sch
 
 if (!isset($response['matches']))
 {
-  var_dump('matches not good');
+  var_dump('matches not here');
   die();
 }
 
@@ -119,134 +132,176 @@ if (!isset($response['matches']))
 foreach ($response['matches'] as $match)
 {
   // status: U, LT1, L1, LHT, L2, C
-  if ('U' !== $match['status'])
+  if ('U' !== $match['status'] && 'C' !== $match['status'] && $match['matchId'] !== $db['live_match'])
   {
-    // get blog id
-    $blog = json_decode(getUrl('http://cmsapi.pulselive.com/liveblog/worldrugby/'.LANG.'/?references=RUGBY_MATCH:'.$match['matchId']), true);
+    $db = array(
+      'live_match' => $match['matchId'],
+      'last_second' => 0,
+    );
 
-    if (!in_array($blog['content'][0]['header']['liveBlogId'], $db['live_matches']))
-    {
-      $db['live_matches'][] = $blog['content'][0]['header']['liveBlogId'];
-      $db[$blog['content'][0]['header']['liveBlogId']] = array('last_post_id' => 0);
-
-      // notify slack & save data
-      postToSlack(':zap: '.$language[LANG][0].' '.$match['teams'][0]['name'].' / '.$match['teams'][1]['name'].' '.$language[LANG][1].'! http://www.rugbyworldcup.com/match/'.$match['matchId'].'#blog');
-      file_put_contents($dbFile, json_encode($db));
-      return;
-    }
+    // notify slack & save data
+    postToSlack(':zap: '.$language[LANG][0].' '.$match['teams'][0]['name'].' / '.$match['teams'][1]['name'].' '.$language[LANG][1].'! http://www.rugbyworldcup.com/match/'.$match['matchId'].'#blog');
+    file_put_contents($dbFile, json_encode($db));
+    return;
   }
 }
 
-// post update on live matches
-foreach ($db['live_matches'] as $key => $liveMatch)
+if (0 == $db['live_match'])
 {
-  // $response = json_decode(getUrl('http://cmsapi.pulselive.com/liveblog/worldrugby/'.$liveMatch.'/'.LANG.'/newerThan/'.$db[$liveMatch]['last_update'].'?client=slack-bot'), true);
-  $response = json_decode(getUrl('http://cmsapi.pulselive.com/liveblog/worldrugby/'.$liveMatch.'/'.LANG.'/?direction=descending&client=slack-bot'), true);
+  var_dump('no live match');
+  return;
+}
 
-  if (!isset($response['entries']))
+$response = json_decode(getUrl('http://cmsapi.pulselive.com/rugby/match/'.$db['live_match'].'/timeline?language='.LANG.'&client=slack-bot'), true);
+
+if (!isset($response['timeline']))
+{
+  var_dump('timeline not here');
+  return;
+}
+
+$posts = $response['timeline'];
+
+foreach ($posts as $post)
+{
+  // MS group time is always bad ...
+  if ($post['time']['secs'] < $db['last_second'] && $post['group'] != 'MS')
   {
-    var_dump('entries not good');
     continue;
   }
 
-  // match isn't live
-  if ('ACTIVE' !== $response['status'])
+  // only notify this kind of event
+  if (!in_array($post['group'], array('Pen', 'M Pen', 'Try', 'YC', 'Con', 'MS', 'Sub On')))
   {
-    unset($db['live_matches'][$key]);
-    unset($db[$liveMatch]);
     continue;
   }
 
-  $posts = $response['entries'];
+  $message = $post['typeLabel'].' ('.$response['match']['teams'][$post['teamIndex']]['name'].')';
 
-  // sort posts by "date"
-  krsort($posts);
-
-  foreach ($posts as $post)
+  switch ($post['group'])
   {
-    if ($post['id'] <= $db[$liveMatch]['last_post_id'])
-    {
-      continue;
-    }
+    // penality
+    case 'Pen':
+      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$post['playerId'];
 
-    $title = $post['title'];
-    $comment = str_replace('"', '', trim(strip_tags($post['comment'])));
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
 
-    switch ($post['icon']['name'])
-    {
-      case 'Text':
-      case 'Match Event':
-        postToSlack($title, $comment);
-        break;
+    // missed penality
+    case 'M Pen':
+      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$post['playerId'];
 
-      case 'Tweet':
-        preg_match('/https:\/\/twitter\.com\/([a-z0-9\-\_]+)\/status\/([0-9]+)/i', $post['comment'], $matches);
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
 
-        if (isset($matches[0]))
-        {
-          postToSlack(':bird: '.$title.': '.$matches[0], $comment);
-        }
-        else
-        {
-          postToSlack(':bird: '.$title, $comment);
-        }
-        break;
+    case 'Try':
+      $message = ':rugby_football: '.$message.' +'.$post['points'].', '.$post['playerId'];
 
-      case 'Photo':
-        preg_match('/http:\/\/(.*)\.jpg/i', $post['comment'], $matches);
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
 
-        if (isset($matches[0]))
-        {
-          postToSlack(':camera: '.$title.': '.$matches[0], $comment);
-        }
-        else
-        {
-          postToSlack(':camera: '.$title, $comment);
-        }
-        break;
+    // yellow card
+    case 'YC':
+      $mesage = ':ledger: '.$message.', '.$post['playerId'];
 
-      case 'Stat':
-        postToSlack(':bar_chart: '.$title, $comment);
-        break;
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
 
-      case 'Try':
-        if ('' !== $post['properties']['score'])
-        {
-          postToSlack(':rugby_football: '.$post['properties']['score'].' – '.$title, $comment);
-        }
-        else
-        {
-          postToSlack(':loudspeaker: '.$title, $comment);
-        }
-        break;
+    // red card
+    case 'RC':
+      $mesage = ':closed_book: '.$message.', '.$post['playerId'];
 
-      case 'Breaking News':
-      case 'Big Hit!':
-        if ('' !== $post['properties']['score'])
-        {
-          postToSlack(':rugby_football: '.$post['properties']['score'].' – '.$title, $comment);
-        }
-        else
-        {
-          postToSlack(':loudspeaker: '.$title, $comment);
-        }
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
 
-        break;
+    // conversion
+    case 'Con':
+      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$post['playerId'];
 
-      case 'Half Time':
-        postToSlack(':toilet: '.$title, $comment);
-        break;
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
 
-      case 'Full Time':
-        postToSlack(':no_good: '.$post['properties']['score'].' – '.$title, $comment);
-        break;
-    }
+    // missed conversion
+    case 'M Con':
+      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$post['playerId'];
+
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
+
+    // match status change
+    case 'MS':
+      // end of first period
+      if ('LHT' == $post['phase'])
+      {
+        $message = ':toilet: '.$message;
+
+        postToSlack($message, array(
+          $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+          $language[LANG][4] => $post['time']['label'],
+        ));
+      }
+      // second period is starting
+      elseif ('L2' == $post['phase'])
+      {
+        $message = ':runner: '.$message;
+
+        postToSlack($message, array(
+          $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+          $language[LANG][4] => $post['time']['label'],
+        ));
+      }
+      // end of second period
+      elseif ('LFT' == $post['phase'])
+      {
+        $message = ':mega: '.$message;
+
+        postToSlack($message, array(
+          $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+          $language[LANG][4] => $post['time']['label'],
+        ));
+
+        $db['live_match'] = 0;
+      }
+      break;
+
+    // replacement
+    case 'Sub On':
+      $mesage = ':arrows_clockwise: '.$message.', '.$post['playerId'];
+
+      postToSlack($message, array(
+        $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
+        'In' => $post['playerId'],
+        'Out' => $post['playerId'],
+        $language[LANG][4] => $post['time']['label'],
+      ));
+      break;
   }
+}
 
-  if (isset($db[$liveMatch]) && isset($post))
-  {
-    $db[$liveMatch]['last_post_id'] = $post['id'];
-  }
+if (isset($post))
+{
+  $db['last_second'] = $post['time']['secs'];
 }
 
 file_put_contents($dbFile, json_encode($db));
