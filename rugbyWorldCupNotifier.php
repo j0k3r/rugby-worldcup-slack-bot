@@ -40,6 +40,9 @@ $language = array(
     'Score',
     'Joueur',
     'Temps',
+    'Mi-temps',
+    'Reprise',
+    'Fin du match',
   ),
   'en' => array(
     'The match between',
@@ -47,6 +50,9 @@ $language = array(
     'Score',
     'Player',
     'Time',
+    'Half-time',
+    'Kick off',
+    'Full time',
   )
 );
 
@@ -211,7 +217,7 @@ foreach ($posts as $post)
 
     // yellow card
     case 'YC':
-      $mesage = ':ledger: '.$message.', '.$post['playerId'];
+      $message = ':ledger: '.$message.', '.$post['playerId'];
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -221,7 +227,7 @@ foreach ($posts as $post)
 
     // red card
     case 'RC':
-      $mesage = ':closed_book: '.$message.', '.$post['playerId'];
+      $message = ':closed_book: '.$message.', '.$post['playerId'];
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -254,7 +260,7 @@ foreach ($posts as $post)
       // end of first period
       if ('LHT' == $post['phase'])
       {
-        $message = ':toilet: '.$message;
+        $message = ':toilet: '.$language[LANG][5];
 
         postToSlack($message, array(
           $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -264,7 +270,7 @@ foreach ($posts as $post)
       // second period is starting
       elseif ('L2' == $post['phase'])
       {
-        $message = ':runner: '.$message;
+        $message = ':runner: '.$language[LANG][6];
 
         postToSlack($message, array(
           $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -274,7 +280,7 @@ foreach ($posts as $post)
       // end of second period
       elseif ('LFT' == $post['phase'])
       {
-        $message = ':mega: '.$message;
+        $message = ':mega: '.$language[LANG][7];
 
         postToSlack($message, array(
           $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -287,7 +293,7 @@ foreach ($posts as $post)
 
     // replacement
     case 'Sub On':
-      $mesage = ':arrows_clockwise: '.$message.', '.$post['playerId'];
+      $message = ':arrows_clockwise: '.$message.', '.$post['playerId'];
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
