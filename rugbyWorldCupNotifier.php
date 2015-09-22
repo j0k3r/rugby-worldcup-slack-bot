@@ -38,7 +38,7 @@ $language = array(
     'Le match',
     'commence',
     'Score',
-    'Joueur',
+    'par',
     'Temps',
     'Mi-temps',
     'Reprise',
@@ -48,10 +48,10 @@ $language = array(
     'The match between',
     'has started',
     'Score',
-    'Player',
+    'by',
     'Time',
-    'Half-time',
-    'Kick off',
+    'Half time',
+    'Kick-off',
     'Full time',
   )
 );
@@ -145,6 +145,23 @@ foreach ($response['matches'] as $match)
       'last_second' => 0,
     );
 
+    $summary = json_decode(getUrl('http://cmsapi.pulselive.com/rugby/match/'.$match['matchId'].'/summary?language='.LANG), true);
+
+    // build player cache
+    $players = array();
+    foreach ($summary['teams'] as $key => $team)
+    {
+      foreach ($team['teamList']['list'] as $player)
+      {
+        $players[$key][$player['player']['id']] = array(
+          'name' => $player['player']['name']['display'],
+          'position' => $player['positionLabel'],
+        );
+      }
+    }
+
+    $db['players'] = $players;
+
     // notify slack & save data
     postToSlack(':zap: '.$language[LANG][0].' '.$match['teams'][0]['name'].' / '.$match['teams'][1]['name'].' '.$language[LANG][1].'! http://www.rugbyworldcup.com/match/'.$match['matchId'].'#blog');
     file_put_contents($dbFile, json_encode($db));
@@ -177,18 +194,24 @@ foreach ($posts as $post)
   }
 
   // only notify this kind of event
-  if (!in_array($post['group'], array('Pen', 'M Pen', 'Try', 'YC', 'Con', 'MS', 'Sub On')))
+  if (!in_array($post['group'], array('Pen', 'M Pen', 'Try', 'YC', 'Con', 'MS', 'Sub On', 'Sub Off')))
   {
     continue;
   }
 
   $message = $post['typeLabel'].' ('.$response['match']['teams'][$post['teamIndex']]['name'].')';
 
+  $player = '';
+  if (isset($post['playerId']))
+  {
+    $player = $db['players'][$post['teamIndex']][$post['playerId']]['name'].' ('.$db['players'][$post['teamIndex']][$post['playerId']]['position'].')';
+  }
+
   switch ($post['group'])
   {
     // penality
     case 'Pen':
-      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$post['playerId'];
+      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -198,7 +221,7 @@ foreach ($posts as $post)
 
     // missed penality
     case 'M Pen':
-      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$post['playerId'];
+      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -207,7 +230,7 @@ foreach ($posts as $post)
       break;
 
     case 'Try':
-      $message = ':rugby_football: '.$message.' +'.$post['points'].', '.$post['playerId'];
+      $message = ':rugby_football: '.$message.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -217,7 +240,7 @@ foreach ($posts as $post)
 
     // yellow card
     case 'YC':
-      $message = ':ledger: '.$message.', '.$post['playerId'];
+      $message = ':ledger: '.$message.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -227,7 +250,7 @@ foreach ($posts as $post)
 
     // red card
     case 'RC':
-      $message = ':closed_book: '.$message.', '.$post['playerId'];
+      $message = ':closed_book: '.$message.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -237,7 +260,7 @@ foreach ($posts as $post)
 
     // conversion
     case 'Con':
-      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$post['playerId'];
+      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -247,7 +270,7 @@ foreach ($posts as $post)
 
     // missed conversion
     case 'M Con':
-      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$post['playerId'];
+      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
@@ -293,12 +316,16 @@ foreach ($posts as $post)
 
     // replacement
     case 'Sub On':
-      $message = ':arrows_clockwise: '.$message.', '.$post['playerId'];
+      $message = ':arrow_up: '.$message.': '.$player;
+
+      postToSlack($message);
+      break;
+
+    case 'Sub Off':
+      $message = ':arrow_down: '.$message.': '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
-        'In' => $post['playerId'],
-        'Out' => $post['playerId'],
         $language[LANG][4] => $post['time']['label'],
       ));
       break;
