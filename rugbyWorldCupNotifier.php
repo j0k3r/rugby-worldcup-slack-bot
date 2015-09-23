@@ -96,8 +96,14 @@ function getUrl($url)
   die();
 }
 
-function postToSlack($text, $attachments_fields = array())
+function postToSlack($text, $attachments_fields = array(), $last_message = '')
 {
+  if ($text == $last_message)
+  {
+    var_dump('duplicate message: '.$text);
+    return;
+  }
+
   $slackUrl = 'https://slack.com/api/chat.postMessage?token='.SLACK_TOKEN.
     '&channel='.urlencode(SLACK_CHANNEL).
     '&username='.urlencode(SLACK_BOT_NAME).
@@ -143,6 +149,7 @@ foreach ($response['matches'] as $match)
     $db = array(
       'live_match' => $match['matchId'],
       'last_second' => 0,
+      'last_message' => '',
     );
 
     $summary = json_decode(getUrl('http://cmsapi.pulselive.com/rugby/match/'.$match['matchId'].'/summary?language='.LANG), true);
@@ -187,8 +194,7 @@ $posts = $response['timeline'];
 
 foreach ($posts as $post)
 {
-  // MS group time is always bad ...
-  if ($post['time']['secs'] < $db['last_second'] && $post['group'] != 'MS')
+  if ($post['time']['secs'] < $db['last_second'])
   {
     continue;
   }
@@ -199,7 +205,7 @@ foreach ($posts as $post)
     continue;
   }
 
-  $message = $post['typeLabel'].' ('.$response['match']['teams'][$post['teamIndex']]['name'].')';
+  $defaultMessage = $post['typeLabel'].' ('.$response['match']['teams'][$post['teamIndex']]['name'].')';
 
   $player = '';
   if (isset($post['playerId']))
@@ -211,71 +217,71 @@ foreach ($posts as $post)
   {
     // penality
     case 'Pen':
-      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
+      $message = ':thumbsup: '.$defaultMessage.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     // missed penality
     case 'M Pen':
-      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$language[LANG][3].' '.$player;
+      $message = ':thumbsdown: '.$defaultMessage.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     case 'Try':
-      $message = ':rugby_football: '.$message.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
+      $message = ':rugby_football: '.$defaultMessage.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     // yellow card
     case 'YC':
-      $message = ':ledger: '.$message.', '.$language[LANG][3].' '.$player;
+      $message = ':ledger: '.$defaultMessage.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     // red card
     case 'RC':
-      $message = ':closed_book: '.$message.', '.$language[LANG][3].' '.$player;
+      $message = ':closed_book: '.$defaultMessage.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     // conversion
     case 'Con':
-      $message = ':thumbsup::skin-tone-2: '.$message.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
+      $message = ':thumbsup: '.$defaultMessage.' +'.$post['points'].', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     // missed conversion
     case 'M Con':
-      $message = ':thumbsdown::skin-tone-2: '.$message.', '.$language[LANG][3].' '.$player;
+      $message = ':thumbsdown: '.$defaultMessage.', '.$language[LANG][3].' '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
 
     // match status change
@@ -288,7 +294,7 @@ foreach ($posts as $post)
         postToSlack($message, array(
           $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
           $language[LANG][4] => $post['time']['label'],
-        ));
+        ), $db['last_message']);
       }
       // second period is starting
       elseif ('L2' == $post['phase'])
@@ -298,7 +304,7 @@ foreach ($posts as $post)
         postToSlack($message, array(
           $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
           $language[LANG][4] => $post['time']['label'],
-        ));
+        ), $db['last_message']);
       }
       // end of second period
       elseif ('LFT' == $post['phase'])
@@ -308,7 +314,7 @@ foreach ($posts as $post)
         postToSlack($message, array(
           $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
           $language[LANG][4] => $post['time']['label'],
-        ));
+        ), $db['last_message']);
 
         $db['live_match'] = 0;
       }
@@ -316,18 +322,18 @@ foreach ($posts as $post)
 
     // replacement
     case 'Sub On':
-      $message = ':arrow_up: '.$message.': '.$player;
+      $message = ':arrow_up: '.$defaultMessage.': '.$player;
 
-      postToSlack($message);
+      postToSlack($message, array(), $db['last_message']);
       break;
 
     case 'Sub Off':
-      $message = ':arrow_down: '.$message.': '.$player;
+      $message = ':arrow_down: '.$defaultMessage.': '.$player;
 
       postToSlack($message, array(
         $language[LANG][2] => $response['match']['scores'][0].' - '.$response['match']['scores'][1],
         $language[LANG][4] => $post['time']['label'],
-      ));
+      ), $db['last_message']);
       break;
   }
 }
@@ -335,6 +341,11 @@ foreach ($posts as $post)
 if (isset($post))
 {
   $db['last_second'] = $post['time']['secs'];
+}
+
+if (isset($message))
+{
+  $db['last_message'] = $message;
 }
 
 file_put_contents($dbFile, json_encode($db));

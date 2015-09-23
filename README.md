@@ -6,13 +6,16 @@ It uses the "unofficial" World Rugby json API (the one used for their mobile app
 
 It will post a message :
   - when a match starts
-  - and of course, for every point
+  - on every try, conversion & penality
+  - on every yellow & red card
+  - on every replacement
+  - on half time, kick-off and full time
 
 ### Preview
 
-Here is a preview of the England vs Fiji match.
+Here is a preview of the Scotland vs Japan match:
 
-![rugby-worldcup-slack-bot sample](http://i.imgur.com/ucMTQrq.png)
+![rugby-worldcup-slack-bot sample](http://i.imgur.com/egqDcus.png)
 
 ### Requirements
 
